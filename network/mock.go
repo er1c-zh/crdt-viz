@@ -3,6 +3,7 @@ package network
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -28,14 +29,20 @@ type Cloud interface {
 }
 
 type Option struct {
-	BufLenRecv  int
-	BufLenWrite int
+	BufLenRecv                      int
+	BufLenWrite                     int
+	LatencyInMillisecond            int64
+	LatencyRandomDeltaInMillisecond int64
+	PkgLossPct                      int
 }
 
 func DefaultOption() Option {
 	return Option{
-		BufLenRecv:  10,
-		BufLenWrite: 10,
+		BufLenRecv:                      10,
+		BufLenWrite:                     10,
+		LatencyInMillisecond:            10,
+		LatencyRandomDeltaInMillisecond: 3,
+		PkgLossPct:                      1,
 	}
 }
 
@@ -43,10 +50,10 @@ func DefaultOption() Option {
 // private
 ////////////////////////////////////////////
 
-type logger struct {}
+type logger struct{}
 
 func (l logger) Logf(s string, i ...interface{}) {
-	fmt.Printf("[mock_network]" + s, i...)
+	fmt.Printf("[mock_network]"+s+"\n", i...)
 }
 
 type express interface {
@@ -67,6 +74,9 @@ type MsgPkg struct {
 	From string
 	To   string
 	Msg  string
+
+	SendTime             int64
+	expectedDeliveryTime int64
 }
 
 type client struct {
@@ -82,9 +92,10 @@ func (c *client) GetRecv() (<-chan MsgPkg, error) {
 
 func (c *client) Write(addr string, msg string) error {
 	return c.Send(MsgPkg{
-		From: c.addr,
-		To:   addr,
-		Msg:  msg,
+		From:     c.addr,
+		To:       addr,
+		Msg:      msg,
+		SendTime: time.Now().UnixNano(),
 	})
 }
 
@@ -103,8 +114,9 @@ func newCloud(opt ...Option) *cloud {
 	inst := &cloud{
 		option: DefaultOption(),
 		Logger: logger{},
-		bus: make(chan MsgPkg),
+		bus:    make(chan MsgPkg),
 	}
+	rand.Seed(time.Now().UnixNano())
 	if len(opt) > 0 {
 		inst.option = opt[0]
 	}
@@ -114,8 +126,13 @@ func newCloud(opt ...Option) *cloud {
 
 func (c *cloud) loop() {
 	queue := make([]MsgPkg, 0)
-	ticker := time.NewTicker(1500*time.Millisecond)
+	ticker := time.NewTicker(1 * time.Millisecond)
 	delivery := func(msg *MsgPkg) {
+		if time.Now().UnixNano()-msg.expectedDeliveryTime < 0 {
+			// skip
+			queue = append(queue, *msg)
+			return
+		}
 		to, ok := c.net.Load(msg.To)
 		if !ok {
 			// skip
@@ -129,17 +146,25 @@ func (c *cloud) loop() {
 			queue = append(queue, *msg)
 		}
 	}
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// try one old
+				if len(queue) == 0 {
+					continue
+				}
+				delivery(&(queue[0]))
+				queue = queue[1:]
+			}
+		}
+	}()
+
 	for {
 		select {
 		case msg := <-c.bus:
 			delivery(&msg)
-		case <-ticker.C:
-			// try one old
-			if len(queue) == 0 {
-				continue
-			}
-			delivery(&(queue[0]))
-			queue = queue[1:]
 		}
 	}
 }
@@ -156,8 +181,16 @@ func (c *cloud) NewClient(addr string, option ...Option) (Interface, error) {
 func (c *cloud) Send(msg MsgPkg) error {
 	// 寻址
 	if _, ok := c.net.Load(msg.To); !ok {
-		c.Logf("Send not found\n")
+		c.Logf("Send not found")
 		return errors.New("target not found")
+	}
+	msg.expectedDeliveryTime = msg.SendTime +
+		(c.option.LatencyInMillisecond+
+			(rand.Int63n(2*c.option.LatencyRandomDeltaInMillisecond)-c.option.LatencyRandomDeltaInMillisecond))*
+			int64(time.Millisecond)
+	if c.option.PkgLossPct > 0 && rand.Intn(100) < c.option.PkgLossPct {
+		c.Logf("mock loss!")
+		return nil
 	}
 	c.bus <- msg
 	return nil
@@ -171,4 +204,3 @@ func (c *cloud) Enable(client *client) error {
 	}
 	return nil
 }
-

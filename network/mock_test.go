@@ -19,7 +19,10 @@ func TestMock(t *testing.T) {
 			for {
 				select {
 				case msg := <-ch:
-					t.Logf("[%s->%s] get %s", msg.From, msg.To, msg.Msg)
+					t.Logf("[%s->%s][%d ms] get %s",
+						msg.From, msg.To,
+						((time.Now().UnixNano() - msg.SendTime) * int64(time.Nanosecond)) / int64(time.Millisecond),
+						msg.Msg)
 				}
 			}
 		}()
