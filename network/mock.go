@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -26,6 +27,8 @@ type Interface interface {
 
 type Cloud interface {
 	NewClient(addr string, option ...Option) (Interface, error)
+	AddChaos(action ChaosAction) (string, error)
+	RemoveChaos(id string)
 }
 
 type Option struct {
@@ -108,6 +111,8 @@ type cloud struct {
 	bus    chan MsgPkg
 	option Option
 	Logger
+
+	chaosMap sync.Map
 }
 
 func newCloud(opt ...Option) *cloud {
@@ -169,6 +174,23 @@ func (c *cloud) loop() {
 	}
 }
 
+// 是否被过滤
+func (c *cloud) filter(msg MsgPkg) bool {
+	filtered := false
+	c.chaosMap.Range(func(_, filter interface{}) bool {
+		f := filter.(Filter)
+		if f(msg) {
+			filtered = true
+			return false
+		}
+		return true
+	})
+	if filtered {
+		return true
+	}
+	return false
+}
+
 func (c *cloud) NewClient(addr string, option ...Option) (Interface, error) {
 	opt := c.option
 	if len(option) > 0 {
@@ -203,4 +225,18 @@ func (c *cloud) Enable(client *client) error {
 		return errors.New("addr already register")
 	}
 	return nil
+}
+
+func (c *cloud) AddChaos(action ChaosAction) (string, error) {
+	f, ok := FilterFactoryMap[action.Action]
+	if !ok {
+		return "", errors.New("unsupported action")
+	}
+	id := strconv.FormatInt(time.Now().UnixNano(), 10)
+	c.chaosMap.Store(id, f)
+	return id, nil
+}
+
+func (c *cloud) RemoveChaos(id string) {
+	c.chaosMap.Delete(id)
 }
