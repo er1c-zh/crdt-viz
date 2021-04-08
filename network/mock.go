@@ -36,7 +36,6 @@ type Option struct {
 	BufLenWrite                     int
 	LatencyInMillisecond            int64
 	LatencyRandomDeltaInMillisecond int64
-	PkgLossPct                      int
 }
 
 func DefaultOption() Option {
@@ -45,7 +44,6 @@ func DefaultOption() Option {
 		BufLenWrite:                     10,
 		LatencyInMillisecond:            10,
 		LatencyRandomDeltaInMillisecond: 3,
-		PkgLossPct:                      1,
 	}
 }
 
@@ -210,8 +208,16 @@ func (c *cloud) Send(msg MsgPkg) error {
 		(c.option.LatencyInMillisecond+
 			(rand.Int63n(2*c.option.LatencyRandomDeltaInMillisecond)-c.option.LatencyRandomDeltaInMillisecond))*
 			int64(time.Millisecond)
-	if c.option.PkgLossPct > 0 && rand.Intn(100) < c.option.PkgLossPct {
-		c.Logf("mock loss!")
+	isFiltered := false
+	c.chaosMap.Range(func(_, f interface{}) bool {
+		filter := f.(Filter)
+		if filter(msg) {
+			isFiltered = true
+			return false
+		}
+		return true
+	})
+	if isFiltered {
 		return nil
 	}
 	c.bus <- msg
@@ -233,7 +239,11 @@ func (c *cloud) AddChaos(action ChaosAction) (string, error) {
 		return "", errors.New("unsupported action")
 	}
 	id := strconv.FormatInt(time.Now().UnixNano(), 10)
-	c.chaosMap.Store(id, f)
+	filter, err := f(action)
+	if err != nil {
+		return "", fmt.Errorf("create filter factory fail: %s", err.Error())
+	}
+	c.chaosMap.Store(id, filter)
 	return id, nil
 }
 

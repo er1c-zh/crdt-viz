@@ -11,6 +11,15 @@ import (
 
 func main() {
 	cloud := network.NewCloud(network.DefaultOption())
+	_, err := cloud.AddChaos(network.ChaosAction{
+		Action: network.ChaosActionSplitBrain,
+		Args:   "1",
+	})
+	if err != nil {
+		fmt.Printf("err: %s", err.Error())
+		return
+	}
+
 	obj := CvRDT.NewObject(g_counter.Factory)
 	obj.Init(cloud, CvRDT.Option{Count: 3})
 	fmt.Printf("%v\n", obj.Query(0))
