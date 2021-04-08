@@ -36,8 +36,13 @@ func (s *State) Update(args CvRDT.UpdateArgs) {
 
 func (s *State) Merge(state CvRDT.State) {
 	_s := state.(*State)
+	for len(s.CounterList) <= len(_s.CounterList) {
+		s.CounterList = append(s.CounterList, 0)
+	}
 	for i, c := range _s.CounterList {
-		s.CounterList[i] += c
+		if c > s.CounterList[i] {
+			s.CounterList[i] = c
+		}
 	}
 }
 

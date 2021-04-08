@@ -203,7 +203,7 @@ func (c *cloud) NewClient(addr string, option ...Option) (Interface, error) {
 func (c *cloud) Send(msg MsgPkg) error {
 	// 寻址
 	if _, ok := c.net.Load(msg.To); !ok {
-		c.Logf("Send not found")
+		c.Logf("Send(%s) not found", msg.To)
 		return errors.New("target not found")
 	}
 	msg.expectedDeliveryTime = msg.SendTime +
